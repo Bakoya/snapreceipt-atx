@@ -1,0 +1,17 @@
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+
+# Optional: override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Disabled/reference-only files - kept on disk, never committed
+*.disabled
+
+
+.DS_Store
