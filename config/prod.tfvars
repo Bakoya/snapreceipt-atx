@@ -14,5 +14,6 @@ database_subnets         = ["10.20.201.0/24", "10.20.202.0/24", "10.20.203.0/24"
 enable_nat_gateway       = true
 create_igw               = true
 account_id               = "841162679160"
-deploy_role              = "cicd-deployment-role"
+# deploy_role              = "cicd-deployment-role"
+deploy_role              ="ladoumi-deployment-role"
 devops_account_id        = "363475792261"
