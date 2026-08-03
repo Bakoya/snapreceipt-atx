@@ -1,6 +1,6 @@
 # ECR
 # core-backend - disabled alongside service-core-backend.tf.disabled / ecr.tf.disabled.
-# Restore together if reinstated (or repurposed as the format for a new snapreceipt service).
+# Restore together if reinstated.
 # output "core_backend_ecr_repository_url" {
 #   value = module.core_backend_registry.repository_url
 # }
@@ -9,6 +9,27 @@
 #   value       = module.core_backend_push_role.role_arn
 #   description = "Give this to whoever the customer designates to push images - they need sts:AssumeRole granted on it from their side"
 # }
+
+output "snapreceipt_ecr_repository_url" {
+  value = module.snapreceipt_registry.repository_url
+}
+
+output "snapreceipt_ecr_push_role_arn" {
+  value       = module.snapreceipt_push_role.role_arn
+  description = "Give this to whoever needs to push images - they need sts:AssumeRole granted on it from their side"
+}
+
+output "snapreceipt_service_name" {
+  value = module.snapreceipt_service.ecs_service_name
+}
+
+output "snapreceipt_target_group_blue_arn" {
+  value = module.snapreceipt_tg_blue.ecs_target_group_arn
+}
+
+output "snapreceipt_target_group_green_arn" {
+  value = module.snapreceipt_tg_green.ecs_target_group_arn
+}
 
 # ECS
 output "ecs_cluster_name" {
