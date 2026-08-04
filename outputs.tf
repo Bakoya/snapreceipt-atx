@@ -31,6 +31,18 @@ output "snapreceipt_target_group_green_arn" {
   value = module.snapreceipt_tg_green.ecs_target_group_arn
 }
 
+output "snapreceipt_dynamodb_table_users" {
+  value = aws_dynamodb_table.snapreceipt_users.name
+}
+
+output "snapreceipt_dynamodb_table_receipts" {
+  value = aws_dynamodb_table.snapreceipt_receipts.name
+}
+
+output "snapreceipt_s3_bucket" {
+  value = aws_s3_bucket.snapreceipt_uploads.id
+}
+
 # ECS
 output "ecs_cluster_name" {
   value = module.ecs_cluster.cluster_name
