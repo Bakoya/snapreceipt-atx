@@ -1,12 +1,10 @@
 # SnapReceipt FastAPI service - real service definition, following the same
 # blue/green + autoscaling format as service-core-backend.tf.disabled.
 #
-# Scope for this test: health-check only (see AskUserQuestion 2026-08-03).
-# The service is wired to serve traffic and pass ALB health checks on /health,
-# which needs no AWS calls. DynamoDB/S3/Textract wiring (env vars, task role
-# permissions) is deliberately NOT included yet - /signup, /receipts, and
-# /spending will 500 until that's added. This is enough to validate blue/green
-# deployment mechanics (does traffic actually shift from blue to green cleanly).
+# Full functional depth (2026-08-XX): DynamoDB tables + S3 bucket + task role
+# permissions + env vars, so /signup, /receipts, /spending actually work -
+# needed to compare blue/green output against the earlier AWS Transform test
+# results, not just validate deployment mechanics.
 #
 # Image: initially points at nothing pushed yet - this task definition will
 # start failing to pull until the AWS-Transform-built image is retagged into
@@ -18,6 +16,67 @@ locals {
     ecs_family     = "snapreceipt-api"
     registry_name  = "${var.cust_name}-snapreceipt-api"
     container_port = 8000
+  }
+}
+
+# --- Data resources (DynamoDB + S3) - same schema as transform-prereqs ---
+
+resource "aws_dynamodb_table" "snapreceipt_users" {
+  name         = "${var.cust_name}-snapreceipt-users"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "user_id"
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  tags = merge(local.tags, tomap({ "Name" = "${var.cust_name}-snapreceipt-users" }))
+}
+
+resource "aws_dynamodb_table" "snapreceipt_receipts" {
+  name         = "${var.cust_name}-snapreceipt-data"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "receipt_id"
+
+  attribute {
+    name = "receipt_id"
+    type = "S"
+  }
+
+  tags = merge(local.tags, tomap({ "Name" = "${var.cust_name}-snapreceipt-data" }))
+}
+
+resource "aws_s3_bucket" "snapreceipt_uploads" {
+  bucket = "${var.cust_name}-snapreceipt-uploads-${var.account_id}"
+  tags   = merge(local.tags, tomap({ "Name" = "${var.cust_name}-snapreceipt-uploads" }))
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "snapreceipt_uploads" {
+  bucket = aws_s3_bucket.snapreceipt_uploads.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "snapreceipt_uploads" {
+  bucket                  = aws_s3_bucket.snapreceipt_uploads.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_cors_configuration" "snapreceipt_uploads" {
+  bucket = aws_s3_bucket.snapreceipt_uploads.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT", "POST"]
+    allowed_origins = ["*"]
+    max_age_seconds = 3600
   }
 }
 
@@ -63,7 +122,13 @@ module "snapreceipt_taskdef" {
           "hostPort"      = local.snapreceipt_service.container_port
         }
       ],
-      "environment" = [],
+      "environment" = [
+        { "name" = "AWS_REGION", "value" = var.region },
+        { "name" = "DYNAMODB_TABLE_USERS", "value" = aws_dynamodb_table.snapreceipt_users.name },
+        { "name" = "DYNAMODB_TABLE_RECEIPTS", "value" = aws_dynamodb_table.snapreceipt_receipts.name },
+        { "name" = "S3_BUCKET_RECEIPTS", "value" = aws_s3_bucket.snapreceipt_uploads.id },
+        { "name" = "FREE_SCANS_PER_MONTH", "value" = "20" }
+      ],
       "secrets"     = [],
       "logConfiguration" = {
         "logDriver" = "awslogs",
@@ -77,25 +142,54 @@ module "snapreceipt_taskdef" {
     }
   ])
 
-  # Minimal for health-check-only scope: just log delivery. Add dynamodb/s3/textract
-  # permissions here (scoped to specific table/bucket ARNs) once functional depth is added.
-  custom_policy_document = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "LogGroupPermissions",
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-EOF
+  # Scoped to exactly the two tables + one bucket this service uses - not a wildcard.
+  custom_policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "LogGroupPermissions"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "DynamoDBAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Scan",
+          "dynamodb:Query"
+        ]
+        Resource = [
+          aws_dynamodb_table.snapreceipt_users.arn,
+          aws_dynamodb_table.snapreceipt_receipts.arn
+        ]
+      },
+      {
+        Sid    = "S3Access"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.snapreceipt_uploads.arn}/*"
+      },
+      {
+        Sid      = "TextractAccess"
+        Effect   = "Allow"
+        Action   = ["textract:AnalyzeExpense"]
+        Resource = "*"
+      }
+    ]
+  })
 
   depends_on = [module.snapreceipt_registry]
 }
